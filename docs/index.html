@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Könyvklub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@500;700&family=Karla:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Bejelentkezés / regisztráció -->
+<section id="auth">
+  <div class="auth-box">
+    <h1>Könyvklub</h1>
+    <p>Oszd meg a kedvenc könyveidet a barátaiddal.</p>
+    <div class="tabs" role="tablist">
+      <button id="tabLogin" role="tab" aria-selected="true">Belépés</button>
+      <button id="tabReg" role="tab" aria-selected="false">Regisztráció</button>
+    </div>
+    <div id="regNameWrap" class="hidden">
+      <label for="regName">Felhasználónév</label>
+      <input id="regName" autocomplete="username">
+    </div>
+    <label for="email">E-mail</label>
+    <input id="email" type="email" autocomplete="email">
+    <label for="pw">Jelszó</label>
+    <input id="pw" type="password" autocomplete="current-password">
+    <p class="err" id="authErr" role="alert"></p>
+    <button class="btn" id="authBtn">Belépés</button>
+  </div>
+</section>
+
+<!-- Főoldal -->
+<div id="app" class="hidden">
+  <header>
+    <h1>Könyvklub</h1>
+    <span class="me" id="meName"></span>
+    <button class="btn small" id="newBook">Új könyv</button>
+    <button class="btn small ghost" id="friendsBtn">Barátok</button>
+    <button class="btn small ghost" id="logout">Kilépés</button>
+  </header>
+  <main>
+    <div class="shelf" id="shelf"></div>
+    <p class="empty hidden" id="empty">Még nincs könyv a polcon. Add hozzá az elsőt az „Új könyv” gombbal.</p>
+  </main>
+</div>
+
+<!-- Könyv nagy nézet: megtekintés, új felvétel és módosítás -->
+<div class="overlay hidden" id="bookOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <h2 id="mTitle">Új könyv</h2>
+    <p class="by" id="mBy"></p>
+    <label for="fCim">Cím</label><input id="fCim">
+    <label for="fIro">Író</label><input id="fIro">
+    <label for="fKonyv">Mit kell tudni a könyvről</label><textarea id="fKonyv"></textarea>
+    <label for="fTartalom">Mit kell tudni a tartalomról</label><textarea id="fTartalom"></textarea>
+    <p class="err" id="bookErr" role="alert"></p>
+    <div class="actions">
+      <button class="btn ghost" id="bookClose">Bezár</button>
+      <button class="btn" id="bookSave">Mentés</button>
+    </div>
+  </div>
+</div>
+
+<!-- Barátok -->
+<aside class="panel hidden" id="friendsPanel" aria-label="Barátok">
+  <div class="panel-head"><h2>Barátok</h2><button class="btn small ghost" id="friendsClose">Bezár</button></div>
+  <label for="friendSearch">Felhasználó keresése név alapján</label>
+  <div class="search"><input id="friendSearch"><button class="btn small" id="friendSearchBtn">Keresés</button></div>
+  <div id="searchResult" class="note"></div>
+  <h3>Beérkezett jelölések</h3>
+  <div id="requests"></div>
+  <h3>Barátaim</h3>
+  <div id="friends"></div>
+</aside>
+
+<script src="config.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script>
+firebase.initializeApp(FIREBASE_CONFIG);
+const auth = firebase.auth();
+const $ = id => document.getElementById(id);
+let me = null, books = [], editing = null, registering = false, mode = 'login';
+
+/* ---------- API ---------- */
+async function api(method, url, body) {
+  const token = await auth.currentUser.getIdToken();
+  const res = await fetch(API_BASE + url, {
+    method,
+    headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!res.ok) {
+    let msg = 'Hiba történt (' + res.status + ')';
+    try { msg = (await res.json()).message || msg; } catch (e) {}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+/* ---------- Belépés / regisztráció ---------- */
+function setMode(m) {
+  mode = m;
+  $('tabLogin').setAttribute('aria-selected', m === 'login');
+  $('tabReg').setAttribute('aria-selected', m === 'reg');
+  $('regNameWrap').classList.toggle('hidden', m === 'login');
+  $('authBtn').textContent = m === 'login' ? 'Belépés' : 'Fiók létrehozása';
+  $('authErr').textContent = '';
+}
+$('tabLogin').onclick = () => setMode('login');
+$('tabReg').onclick = () => setMode('reg');
+
+$('authBtn').onclick = async () => {
+  $('authErr').textContent = '';
+  const email = $('email').value.trim(), pw = $('pw').value;
+  try {
+    if (mode === 'login') {
+      await auth.signInWithEmailAndPassword(email, pw);
+    } else {
+      registering = true;
+      const cred = await auth.createUserWithEmailAndPassword(email, pw);
+      try {
+        await api('POST', '/api/felhasznalo/profil', {felhasznalonev: $('regName').value});
+      } catch (e) {
+        await cred.user.delete(); // ha a név foglalt, ne maradjon profil nélküli fiók
+        throw e;
+      } finally { registering = false; }
+      await start();
+    }
+  } catch (e) {
+    registering = false;
+    $('authErr').textContent = e.message;
+  }
+};
+
+auth.onAuthStateChanged(async user => {
+  if (registering) return;
+  if (!user) { me = null; $('app').classList.add('hidden'); $('auth').classList.remove('hidden'); return; }
+  try { await start(); } catch (e) { $('authErr').textContent = e.message; auth.signOut(); }
+});
+$('logout').onclick = () => auth.signOut();
+
+async function start() {
+  me = await api('GET', '/api/felhasznalo/en');
+  $('meName').textContent = me.felhasznalonev;
+  $('auth').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  await loadBooks();
+}
+
+/* ---------- Polc ---------- */
+function szin(s) { // a címből választott, mindig ugyanaz a borítószín
+  const szinek = ['#7a2e2e', '#2f4a3a', '#2d3e5c', '#8a6a2a', '#4b3a5e', '#3d5a5a', '#6b3b2a', '#55603a'];
+  let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 997;
+  return szinek[h % szinek.length];
+}
+async function loadBooks() {
+  books = await api('GET', '/api/konyvek');
+  books.sort((a, b) => a.cim.localeCompare(b.cim, 'hu'));
+  const shelf = $('shelf'); shelf.textContent = '';
+  books.forEach(k => {
+    const b = document.createElement('button');
+    b.className = 'book'; b.style.backgroundColor = szin(k.cim);
+    const t = document.createElement('span'); t.className = 't'; t.textContent = k.cim;
+    const a = document.createElement('span'); a.className = 'a'; a.textContent = k.iro;
+    const box = document.createElement('span'); box.append(a);
+    if (k.tulajdonosUid !== me.uid) {
+      const o = document.createElement('span'); o.className = 'o'; o.textContent = k.tulajdonosNev;
+      box.append(document.createElement('br'), o);
+    }
+    b.append(t, box);
+    b.onclick = () => openBook(k);
+    shelf.append(b);
+  });
+  $('empty').classList.toggle('hidden', books.length > 0);
+}
+
+/* ---------- Nagy nézet ---------- */
+function openBook(k) {
+  editing = k;
+  const own = !k || k.tulajdonosUid === me.uid;
+  $('mTitle').textContent = k ? k.cim : 'Új könyv';
+  $('mBy').textContent = k && !own ? k.tulajdonosNev + ' könyve' : '';
+  $('fCim').value = k?.cim || ''; $('fIro').value = k?.iro || '';
+  $('fKonyv').value = k?.konyvInfo || ''; $('fTartalom').value = k?.tartalomInfo || '';
+  ['fCim', 'fIro', 'fKonyv', 'fTartalom'].forEach(id => $(id).readOnly = !own);
+  $('bookSave').classList.toggle('hidden', !own);
+  $('bookSave').textContent = k ? 'Módosítások mentése' : 'Könyv hozzáadása';
+  $('bookErr').textContent = '';
+  $('bookOverlay').classList.remove('hidden');
+  $(own ? 'fCim' : 'bookClose').focus();
+}
+const closeBook = () => $('bookOverlay').classList.add('hidden');
+$('newBook').onclick = () => openBook(null);
+$('bookClose').onclick = closeBook;
+$('bookOverlay').onclick = e => { if (e.target === $('bookOverlay')) closeBook(); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeBook(); $('friendsPanel').classList.add('hidden'); } });
+
+$('bookSave').onclick = async () => {
+  const dto = {cim: $('fCim').value, iro: $('fIro').value, konyvInfo: $('fKonyv').value, tartalomInfo: $('fTartalom').value};
+  try {
+    if (editing) await api('PUT', '/api/konyvek/' + editing.id, dto);
+    else await api('POST', '/api/konyvek', dto);
+    closeBook();
+    await loadBooks();
+  } catch (e) { $('bookErr').textContent = e.message; }
+};
+
+/* ---------- Barátok ---------- */
+function sor(nev, gomb) {
+  const r = document.createElement('div'); r.className = 'row';
+  const n = document.createElement('span'); n.className = 'n'; n.textContent = nev;
+  r.append(n); if (gomb) r.append(gomb); return r;
+}
+function gomb(szoveg, fn) {
+  const b = document.createElement('button'); b.className = 'btn small'; b.textContent = szoveg; b.onclick = fn; return b;
+}
+async function loadFriends() {
+  const [reqs, fr] = await Promise.all([api('GET', '/api/baratok/kerelmek'), api('GET', '/api/baratok')]);
+  const rq = $('requests'); rq.textContent = '';
+  if (!reqs.length) rq.innerHTML = '<p class="note">Nincs új jelölés.</p>';
+  reqs.forEach(r => rq.append(sor(r.feladoNev, gomb('Elfogadás', async () => {
+    await api('POST', `/api/baratok/kerelmek/${r.id}/elfogad`); await loadFriends(); await loadBooks();
+  }))));
+  const fl = $('friends'); fl.textContent = '';
+  if (!fr.length) fl.innerHTML = '<p class="note">Még nincs barátod.</p>';
+  fr.forEach(f => fl.append(sor(f.felhasznalonev)));
+}
+$('friendsBtn').onclick = async () => {
+  $('friendsPanel').classList.remove('hidden');
+  $('searchResult').textContent = '';
+  try { await loadFriends(); } catch (e) { $('searchResult').textContent = e.message; }
+};
+$('friendsClose').onclick = () => $('friendsPanel').classList.add('hidden');
+$('friendSearchBtn').onclick = async () => {
+  const out = $('searchResult'); out.textContent = '';
+  const nev = $('friendSearch').value.trim(); if (!nev) return;
+  try {
+    const u = await api('GET', '/api/felhasznalo/kereses?nev=' + encodeURIComponent(nev));
+    out.append(sor(u.felhasznalonev, u.uid === me.uid ? null : gomb('Barátnak jelölöm', async ev => {
+      try { await api('POST', '/api/baratok/jeloles/' + u.uid); out.textContent = 'Jelölés elküldve.'; }
+      catch (e) { out.textContent = e.message; }
+    })));
+  } catch (e) { out.textContent = e.message; }
+};
+</script>
+</body>
+</html>
