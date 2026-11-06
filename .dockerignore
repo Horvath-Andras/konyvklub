@@ -1,0 +1,3 @@
+target/
+serviceAccountKey.json
+.idea/
