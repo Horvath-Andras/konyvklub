@@ -3,7 +3,7 @@ const API_BASE = ['localhost', '127.0.0.1'].includes(location.hostname)
   : 'https://konyvklub.onrender.com';
 
 const FIREBASE_CONFIG = {
-  apiKey: "IDE_MASOLD_AZ_API_KEYT",
-  authDomain: "IDE_MASOLD_A_PROJEKT.firebaseapp.com",
-  projectId: "IDE_MASOLD_A_PROJEKT_ID"
+  apiKey: "AIzaSyAMEIudAq-r7xlTy1Vgm9Nbhbdtz7mgv8A",
+  authDomain: "konyvklubbackend.firebaseapp.com",
+  projectId: "konyvklubbackend"
 };
