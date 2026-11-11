@@ -17,11 +17,6 @@ import java.nio.charset.StandardCharsets;
 
 @Configuration
 public class FirebaseConfig {
-    /**
-     * Létrehozza és elérhetővé teszi a Firestore adatbázis-kapcsolatot.
-     * Ha a kulcsot tartalmazó változó ki van töltve (éles szerver a render által), abból olvassa a kulcsot,
-     * különben a megadott fájlból (serviceAccountKey.json).
-     */
     @Bean
     public Firestore firestore(@Value("${firebase.service-account-json:}") String json,
                                @Value("${firebase.service-account-path}") String path)
